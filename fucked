@@ -1,0 +1,661 @@
+/* class ticket.php */
+
+<?php
+class Ticket {	
+	private $ticketsTable = 'tickets';	
+	private $ticketReplyTable = 'ticket_replies';
+	private $issueTable = 'issue';
+	private $userTable = 'ticket_user';
+	private $conn;
+	public function __construct($db){
+        $this->conn = $db;
+    }
+	public function insert(){
+		if($this->subject && $this->message) {
+			$stmt = $this->conn->prepare("
+			INSERT INTO ".$this->ticketsTable."(`title`, `message`, `userid`, `issue_id`)
+			VALUES(?,?,?,?)");
+			$this->subject = htmlspecialchars(strip_tags($this->subject));
+			$this->message = htmlspecialchars(strip_tags($this->message));
+			$this->issue = htmlspecialchars(strip_tags($this->issue));			
+			$stmt->bind_param("ssii", $this->subject, $this->message, $_SESSION["userid"], $this->issue);
+			if($stmt->execute()){
+				return true;
+			}		
+		}
+	}
+
+	public function getTicket(){		
+		$sqlWhere = '';		
+		$status = 'open';
+		$order = ' ORDER BY id DESC';
+		if(!empty($this->status) && $this->status == 'closed') {
+			$status = 'closed';
+		} elseif(!empty($this->order) && $this->order == 'oldest') {
+			$order = ' ORDER BY id ASC';
+		} 
+		if(!empty($this->mentioned) && $this->mentioned) {
+			$sqlWhere .= " AND ticket.mentioned like '%".$this->mentioned."%'";
+		} else if(!empty($this->userId)) {
+			$sqlWhere = " AND ticket.userid = '".$this->userId."'";
+		}		
+		$sqlQuery = "
+			SELECT ticket.id, ticket.title, ticket.message, ticket.userid, ticket.mentioned, ticket.created, ticket.status, user.name
+			FROM ".$this->ticketsTable." ticket
+			LEFT JOIN ".$this->userTable." user ON user.userid = ticket.userid
+			LEFT JOIN ".$this->issueTable." issue ON issue.id = ticket.issue_id
+			WHERE ticket.status = '".$status."' $sqlWhere $order";	
+		$stmt = $this->conn->prepare($sqlQuery);			
+		$stmt->execute();
+		$result = $stmt->get_result();
+		return $result;
+	}	
+	
+	public function getTicketDetail(){			
+		if($_SESSION["userid"] && $this->ticket_id) {				
+			$sqlQuery = "
+				SELECT ticket.id, ticket.title, ticket.message, ticket.userid, ticket.mentioned, ticket.created, ticket.status, user.name, reply.comments, reply.created AS reply_date
+				FROM ".$this->ticketsTable." ticket
+				LEFT JOIN ".$this->ticketReplyTable." reply ON ticket.id = reply.ticket_id
+				LEFT JOIN ".$this->userTable." user ON user.userid = ticket.userid				
+				WHERE ticket.id = '".$this->ticket_id."'";	
+			$stmt = $this->conn->prepare($sqlQuery);			
+			$stmt->execute();
+			$result = $stmt->get_result();
+			return $result;
+		}
+	}
+	
+	function getTicketCountWithStatus ($status) {		
+		$sqlWhere = '';
+		$stmt = $this->conn->prepare("SELECT count(*) AS total
+		FROM ".$this->ticketsTable." 
+		WHERE status = ? $sqlWhere");		
+		$stmt->bind_param("s", $status);
+		$stmt->execute();			
+		$result = $stmt->get_result();	
+		$reply = $result->fetch_assoc();
+		return $reply['total'];
+	}
+	
+	public function getReplyCount() {
+		if($this->id) {
+			$stmt = $this->conn->prepare("SELECT count(*) AS total
+			FROM ".$this->ticketReplyTable." 
+			WHERE id = ?");		
+			$stmt->bind_param("i", $this->id);
+			$stmt->execute();			
+			$result = $stmt->get_result();	
+			$reply = $result->fetch_assoc();
+			return $reply['total'];
+		}
+	}
+	
+	function saveTicketReply() {
+		if($_SESSION["userid"] && $this->ticketId && $this->replyMessage) {
+			$stmt = $this->conn->prepare("
+			INSERT INTO ".$this->ticketReplyTable."(`ticket_id`, `comments`, `created_by`)
+			VALUES(?,?,?)");
+			$this->replyMessage = htmlspecialchars(strip_tags($this->replyMessage));
+			$this->ticketId = htmlspecialchars(strip_tags($this->ticketId));
+			$stmt->bind_param("iss", $this->ticketId, $this->replyMessage, $_SESSION["userid"]);
+			if($stmt->execute()){
+				return true;
+			}		
+		}	
+	}	
+	
+	function openTicket() {		
+		if($_SESSION["userid"] && $this->ticketId) {
+			$stmt = $this->conn->prepare("
+			UPDATE ".$this->ticketsTable." 
+			SET status = 'open' 
+			WHERE id = ?");	
+			$this->ticketId = htmlspecialchars(strip_tags($this->ticketId));		
+			$stmt->bind_param("i", $this->ticketId);
+			if($stmt->execute()){
+				return true;
+			}		
+		}		
+	}
+	
+	function closeTicket() {		
+		if($_SESSION["userid"] && $this->ticketId) {
+			$stmt = $this->conn->prepare("
+			UPDATE ".$this->ticketsTable." 
+			SET status = 'closed' 
+			WHERE id = ?");	
+			$this->ticketId = htmlspecialchars(strip_tags($this->ticketId));		
+			$stmt->bind_param("i", $this->ticketId);
+			if($stmt->execute()){
+				return true;
+			}		
+		}		
+	}
+	
+	function mentionUser() {		
+		if($_SESSION["userid"] && $this->mentionUser) {
+			$stmt = $this->conn->prepare("
+			UPDATE ".$this->ticketsTable." 
+			SET mentioned = CONCAT(mentioned,',$this->mentionUser')
+			WHERE id = ?");	
+			$this->mentionTicketId = htmlspecialchars(strip_tags($this->mentionTicketId));		
+			$stmt->bind_param("i", $this->mentionTicketId);
+			if($stmt->execute()){
+				return true;
+			}		
+		}		
+	}
+	
+	function removeMentionEmail() {		
+		if($_SESSION["userid"] && $this->mentionTicketId && $this->mentionEmail) {
+			$stmt = $this->conn->prepare("
+			UPDATE ".$this->ticketsTable." 
+			SET mentioned = REPLACE(mentioned, '".$this->mentionEmail."', '')
+			WHERE id = ?");	
+			$this->mentionTicketId = htmlspecialchars(strip_tags($this->mentionTicketId));		
+			$stmt->bind_param("i", $this->mentionTicketId);
+			if($stmt->execute()){
+				return true;
+			}		
+		}		
+	}
+	
+	function getMentionUser() {
+		if($this->ticket_id) {
+			$sqlQuery = "
+				SELECT mentioned 
+				FROM ".$this->ticketsTable." 
+				WHERE id = ?";			
+			$stmt = $this->conn->prepare($sqlQuery);
+			$this->ticket_id = htmlspecialchars(strip_tags($this->ticket_id));
+			$stmt->bind_param("i", $this->ticket_id);
+			$stmt->execute();
+			$result = $stmt->get_result();
+			return $result;
+		}
+	}
+	
+	function getTicketCount() {
+		$sqlQuery = "
+		SELECT * FROM ".$this->ticketsTable." 
+		WHERE status = 'open'";			
+		$stmt = $this->conn->prepare($sqlQuery);
+		$stmt->execute();
+		$result = $stmt->get_result();
+		return $result->num_rows;
+	}
+	
+	function getUsersTicket() {
+		$sqlQuery = "
+		SELECT * FROM ".$this->ticketsTable." 
+		WHERE status = 'open' AND userid = ?";			
+		$stmt = $this->conn->prepare($sqlQuery);
+		$stmt->bind_param("i", $_SESSION["userid"]);
+		$stmt->execute();
+		$result = $stmt->get_result();
+		return $result->num_rows;
+	}
+	
+	function issueList(){		
+		$stmt = $this->conn->prepare("SELECT id, issue, status 
+		FROM ".$this->issueTable);				
+		$stmt->execute();			
+		$result = $stmt->get_result();		
+		return $result;	
+	}	
+	
+	function timeElapsedString($datetime, $full = false) {
+		$now = new DateTime;
+		$ago = new DateTime($datetime);
+		$diff = $now->diff($ago);
+		$diff->w = floor($diff->d / 7);
+		$diff->d -= $diff->w * 7;
+		$string = array(
+			'y' => 'year',
+			'm' => 'month',
+			'w' => 'week',
+			'd' => 'day',
+			'h' => 'hour',
+			'i' => 'minute',
+			's' => 'second',
+		);
+		foreach ($string as $k => &$v) {
+			if ($diff->$k) {
+				$v = $diff->$k . ' ' . $v . ($diff->$k > 1 ? 's' : '');
+			} else {
+				unset($string[$k]);
+			}
+		}
+		if (!$full) $string = array_slice($string, 0, 1);
+		return $string ? implode(', ', $string) . ' ago' : 'just now';
+	}
+}
+?>
+
+
+/* ticket.js */
+
+$(document).ready(function(){
+
+	var urlPath = window.location.search;
+	var tabId = urlPath.split('=').pop();    
+	$('#open, #closed, #newest, #oldest').removeClass('active');	
+	$('#'+tabId).addClass('active');
+	
+	$("#ticketForm").submit(function(event){	
+		saveTicket();	
+		return false;
+	});
+	
+	$('#ticketReplyButton').click(function(){
+		var ticketId = $(this).attr("data-ticket-id");		
+		$('#ticketReplyModal').on("shown.bs.modal", function () {
+			$('#ticketId').val(ticketId);
+		}).modal({
+			backdrop: 'static',
+			keyboard: false
+		});		
+	});
+	
+	$("#ticketReplyModal").on('submit','#replyForm', function(event){
+		event.preventDefault();
+		$('#save').attr('disabled','disabled');
+		var formData = $(this).serialize();
+		$.ajax({
+			url:"action.php",
+			method:"POST",
+			data:formData,
+			success:function(data){				
+				$('#replyForm')[0].reset();
+				$('#ticketReplyModal').modal('hide');				
+				$('#save').attr('disabled', false);	
+				location.reload();
+			}
+		})
+	});	
+	
+	$("#ticketReplyDetails").on('click','#openTicket', function(event){
+		var ticketId = $(this).attr("data-ticket-id");
+		var action = "openTicket";
+		$.ajax({
+			url:"action.php",
+			method:"POST",
+			data:{ticketId:ticketId, action:action},
+			success:function(data) {					
+				location.reload();
+			}
+		});
+		
+	});
+	
+	$("#ticketReplyDetails").on('click','#closeTicket', function(event){
+		var ticketId = $(this).attr("data-ticket-id");
+		var action = "closeTicket";
+		$.ajax({
+			url:"action.php",
+			method:"POST",
+			data:{ticketId:ticketId, action:action},
+			success:function(data) {					
+				location.reload();
+			}
+		});
+	});
+	
+	$('#mentionUser').click(function(){
+		var ticketId = $(this).attr("data-ticket-id");		
+		$('#mentionModal').on("shown.bs.modal", function () {
+			$('#mentionTicketId').val(ticketId);
+		}).modal({
+			backdrop: 'static',
+			keyboard: false
+		});		
+	});
+	
+	
+	$("#mentionModal").on('submit','#mentionForm', function(event){
+		event.preventDefault();
+		$('#save').attr('disabled','disabled');
+		var formData = $(this).serialize();
+		$.ajax({
+			url:"action.php",
+			method:"POST",
+			data:formData,
+			success:function(data){				
+				$('#mentionForm')[0].reset();
+				$('#mentionModal').modal('hide');				
+				$('#save').attr('disabled', false);	
+				location.reload();
+			}
+		})
+	});	
+	
+	$('[id^=removeMentionEmail_]').click(function(e){		
+		var mentionEmail = $(this).attr('data-mention-email');
+		var ticketId = $(this).attr("data-ticket-id");	
+		console.log(mentionEmail);
+		var action = "removeMentionEmail";
+		$.ajax({
+			url:"action.php",
+			method:"POST",
+			data:{mentionTicketId:ticketId, mentionEmail : mentionEmail, action:action},
+			success:function(data) {					
+				location.reload();
+			}
+		});
+		
+	});
+	
+});
+
+
+function saveTicket(){
+	 $.ajax({
+		type: "POST",
+		url: "action.php",
+		cache:false,
+		data: $('form#ticketForm').serialize(),
+		success: function(response){			
+			$("#newIssue").modal('hide');
+			location.reload();
+		},
+		error: function(){
+			alert("Error");
+		}
+	});
+}
+
+
+/* index.php */
+
+<?php
+include_once 'config/Database.php';
+include_once 'class/User.php';
+include_once 'class/Ticket.php';
+
+$database = new Database();
+$db = $database->getConnection();
+
+$user = new User($db);
+$ticket = new Ticket($db);
+
+if(!$user->loggedIn()) {	
+	header("Location: login.php");	
+}
+
+include('inc/header.php');
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title>Home</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>	
+<link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css"> <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"></script> 
+<script src="https://netdna.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script> 
+<link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.3.0/css/font-awesome.min.css" rel="stylesheet">
+<script src="js/ticket.js"></script>
+<link href="css/style.css" rel="stylesheet">
+<div class="container">
+<section class="content">
+	<div class="row">		
+		<?php include('left_navigation.php'); ?>
+		<div class="col-md-9">
+			<div class="grid support-content">
+				 <div class="grid-body">
+					 <h2>Tickets</h2>
+					 <hr>
+					 <div class="btn-group">
+						<a href="index.php?status=open">
+							<button type="button" id="open" class="btn btn-default active"><?php echo $ticket->getTicketCountWithStatus('open'); ?> Open</button>
+						</a>						
+					</div>
+					<div class="btn-group">
+						<a href="index.php?status=closed">
+							<button type="button" id="closed" class="btn btn-default"><?php echo $ticket->getTicketCountWithStatus('closed'); ?> Closed</button>
+						</a>
+					</div>
+					<div class="btn-group">
+						<a href="index.php?order=newest">
+							<button type="button" id="newest" class="btn btn-default">Newest</button>
+						</a>
+					</div>
+					<div class="btn-group">
+						<a href="index.php?order=oldest">
+							<button type="button" id="oldest" class="btn btn-default">Oldest</button>
+						</a>
+					</div>
+					<button type="button" class="btn btn-success pull-right" data-toggle="modal" data-target="#newIssue">Create Ticket</button>
+					<div class="modal fade" id="newIssue" tabindex="-1" role="dialog" aria-labelledby="newIssue" aria-hidden="true">
+						<div class="modal-wrapper">
+							<div class="modal-dialog">
+								<div class="modal-content">
+									<div class="modal-header bg-blue">
+										<button type="button" class="close" data-dismiss="modal" aria-hidden="true">×</button>
+										<h4 class="modal-title"><i class="fa fa-pencil"></i> Create New Ticket</h4>
+									</div>
+									<form id="ticketForm" method="post">
+										<div class="modal-body">
+											<div class="form-group">
+												<input name="subject" type="text" class="form-control" placeholder="Subject">
+											</div>	
+											<div class="form-group">
+												<select style="height:34px;" class="form-control" id="issue" name="issue">
+													<option value=''>Select Issue</option>
+													<?php 
+													$result = $ticket->issueList();
+													while ($issue = $result->fetch_assoc()) { 	
+													?>
+														<option value="<?php echo $issue['id']; ?>"><?php echo ucfirst($issue['issue']); ?></option>							
+													<?php } ?>
+												</select>
+											</div>	
+											<div class="form-group">
+												<textarea name="message" class="form-control" placeholder="Please detail your issue or question" style="height: 120px;"></textarea>
+											</div>											
+										</div>
+										<div class="modal-footer">
+											<input name="action" type="hidden" value="createTicket">
+											<button type="submit" class="btn btn-default" data-dismiss="modal"><i class="fa fa-times"></i> Close</button>
+											<button type="submit" class="btn btn-primary pull-right"><i class="fa fa-pencil"></i> Create</button>
+										</div>
+									</form>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="padding"></div>
+					<div class="row">						
+						<div class="col-md-12">
+							<ul class="list-group fa-padding">
+								<?php
+								if(isset($_GET['userid']) && !empty($_GET['userid'])) {
+									$ticket->userId = $_GET['userid'];
+								}
+								if(isset($_GET['status']) && !empty($_GET['status'])) {
+									$ticket->status = $_GET['status'];
+								} else if(isset($_GET['order']) && !empty($_GET['order'])) {
+									$ticket->order = $_GET['order'];
+								} else if(isset($_GET['mentioned']) && !empty($_GET['mentioned'])) {
+									$ticket->mentioned = $_GET['mentioned'];
+								}		
+								$ticketResult = $ticket->getTicket();
+								while ($ticketDetails = $ticketResult->fetch_assoc()) {
+									$ticket->id = $ticketDetails["id"];
+								?>
+								<li class="list-group-item">
+									<div class="media">
+										<i class="fa fa-code pull-left"></i>
+										<div class="media-body">
+											<a href="ticket.php?ticket_id=<?php echo $ticketDetails["id"]; ?>"><strong><?php echo $ticketDetails['title']; ?></strong> <span class="number pull-right"># <?php echo $ticketDetails['id']; ?> </span></a>
+											<p class="info">Opened by <a href="#"><?php echo $ticketDetails['name']; ?></a> <?php echo $ticket->timeElapsedString($ticketDetails['created']); ?> <i class="fa fa-comments"></i> <a href="#"><?php echo $ticket->getReplyCount(); ?> Reply</a></p>
+										</div>
+									</div>
+								</li>
+								<?php
+								}
+								?>								
+							</ul>
+						</div>						
+					</div>
+				</div>
+			</div>
+		</div>		
+	</div>
+</section>
+</div>
+
+
+/* database */
+
+-- MariaDB dump 10.19-11.3.2-MariaDB, for Win64 (AMD64)
+--
+-- Host: localhost    Database: ticket_system
+-- ------------------------------------------------------
+-- Server version	11.3.2-MariaDB
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+
+--
+-- Table structure for table `issue`
+--
+
+DROP TABLE IF EXISTS `issue`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `issue` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `issue` varchar(255) DEFAULT NULL,
+  `status` enum('enable','disable') NOT NULL DEFAULT 'enable',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `issue`
+--
+
+LOCK TABLES `issue` WRITE;
+/*!40000 ALTER TABLE `issue` DISABLE KEYS */;
+INSERT INTO `issue` VALUES
+(1,'Technical','enable'),
+(2,'Development','enable'),
+(3,'Design','enable'),
+(4,'QA','enable'),
+(5,'Support','enable');
+/*!40000 ALTER TABLE `issue` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `ticket_replies`
+--
+
+DROP TABLE IF EXISTS `ticket_replies`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `ticket_replies` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `ticket_id` int(11) NOT NULL,
+  `comments` text NOT NULL,
+  `created_by` varchar(255) NOT NULL,
+  `created` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `ticket_replies`
+--
+
+LOCK TABLES `ticket_replies` WRITE;
+/*!40000 ALTER TABLE `ticket_replies` DISABLE KEYS */;
+INSERT INTO `ticket_replies` VALUES
+(2,2,'I am working on this.','1','2021-11-27 21:30:19'),
+(3,2,'Now issue has been fixed. Please check and let me know. thanks','2','2021-11-28 12:10:35'),
+(4,6,'zsfagagasg','1','2021-11-28 22:13:08'),
+(5,6,'aaaaaaaaaaa','1','2021-11-28 22:13:15'),
+(6,2,'Have you checked this? it should be fixed now.','1','2021-11-28 22:14:06'),
+(7,6,'fasfasfasf','1','2021-12-12 11:26:54'),
+(8,6,'aaaaaaaaaaaaa','1','2021-12-12 11:27:07'),
+(9,9,'I am looking into this issue','1','2021-12-24 20:27:01');
+/*!40000 ALTER TABLE `ticket_replies` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `ticket_user`
+--
+
+DROP TABLE IF EXISTS `ticket_user`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `ticket_user` (
+  `userid` int(11) NOT NULL AUTO_INCREMENT,
+  `email` varchar(200) NOT NULL,
+  `password` varchar(200) NOT NULL,
+  `name` varchar(200) NOT NULL,
+  `role` enum('admin','member') NOT NULL,
+  `status` enum('Active','Inactive') NOT NULL,
+  PRIMARY KEY (`userid`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `ticket_user`
+--
+
+LOCK TABLES `ticket_user` WRITE;
+/*!40000 ALTER TABLE `ticket_user` DISABLE KEYS */;
+INSERT INTO `ticket_user` VALUES
+(1,'admin@email.com','202cb962ac59075b964b07152d234b70','Admin','admin','Active'),
+(2,'member@email.com','202cb962ac59075b964b07152d234b70','Member','member','Active');
+/*!40000 ALTER TABLE `ticket_user` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `tickets`
+--
+
+DROP TABLE IF EXISTS `tickets`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `tickets` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `title` varchar(255) NOT NULL,
+  `message` text NOT NULL,
+  `userid` int(11) NOT NULL,
+  `issue_id` int(11) DEFAULT NULL,
+  `mentioned` text NOT NULL,
+  `created` datetime NOT NULL DEFAULT current_timestamp(),
+  `status` enum('open','closed','resolved') NOT NULL DEFAULT 'open',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `tickets`
+--
+
+LOCK TABLES `tickets` WRITE;
+/*!40000 ALTER TABLE `tickets` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tickets` ENABLE KEYS */;
+UNLOCK TABLES;
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- Dump completed on 2024-04-04  4:58:03
